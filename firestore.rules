@@ -1,0 +1,60 @@
+rules_version = '2';
+
+// アプリは submit-result が uid / handCount / guessCount を保存（MAX 7 手対応）
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // chat_messages の削除許可は isChatModerator と同期（adminUids.ts の BUILTIN / 追加分は手動で追加）
+    function isChatModerator() {
+      return request.auth != null
+        && request.auth.uid == 'WVvphz6TOZSKuwck6Kf83vAFupo2';
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      // write だと delete も許可されるため create/update のみ
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    match /runs/{runId} {
+      allow read: if true;
+      // コードはフィールド名 uid を使用（userId ではない）
+      allow create: if request.auth != null
+        && runId.matches('^' + request.auth.uid + '_.+')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.handCount >= 1
+        && request.resource.data.handCount <= 7
+        && request.resource.data.guessCount >= 0
+        && request.resource.data.guessCount <= 7;
+      allow update, delete: if false;
+    }
+
+    match /character_stats/{charId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // ロビーチャット（匿名 UID で送受信）
+    // hasOnly だとフィールド追加のたびにルール更新が必要。hasAll なら必須キーだけ揃えばよく、任意フィールドを後から足しやすい
+    match /chat_messages/{msgId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasAll(['text', 'displayName', 'uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 80
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 1
+        && request.resource.data.displayName.size() <= 12
+        // serverTimestamp() 相当（クライアントが時刻を偽装できない）
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      // 自分のメッセージ、または管理者 UID（全削除・個別削除）
+      allow delete: if request.auth != null
+        && (resource.data.uid == request.auth.uid || isChatModerator());
+    }
+  }
+}
