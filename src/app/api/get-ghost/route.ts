@@ -10,7 +10,7 @@ import {
 import { NextResponse } from "next/server";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 
-const RUNS_SAMPLE_LIMIT = 200;
+const RUNS_SAMPLE_LIMIT = 90;
 /** 1〜2 手正解の記録はゴーストに使わない */
 const MIN_GHOST_WIN_HANDS = 3;
 

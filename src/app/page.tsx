@@ -858,6 +858,14 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              <a
+                href="https://realtime-seven.vercel.app/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 block w-full rounded-xl border border-amber-500/30 bg-[#0d1324]/85 px-3 py-2.5 text-center text-sm font-semibold text-amber-200/95 transition hover:border-amber-500/50 sm:px-4 sm:py-3"
+              >
+                リアルタイム対戦
+              </a>
             </div>
 
             <p className="mt-3 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
