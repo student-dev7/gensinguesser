@@ -166,6 +166,7 @@ export default function Home() {
     () =>
       validateDisplayName(nameDraft, {
         ignoreBadSubstrings: isAdminUid(viewerUid),
+        adminFullBypass: isAdminUid(viewerUid),
       }),
     [nameDraft, viewerUid]
   );
@@ -372,10 +373,10 @@ export default function Home() {
       await ensureAnonymousSession();
 
       const authForName = getFirebaseAuth();
+      const uidForName = authForName.currentUser?.uid ?? null;
       const nameCheck = validateDisplayName(playerName, {
-        ignoreBadSubstrings: isAdminUid(
-          authForName.currentUser?.uid ?? null
-        ),
+        ignoreBadSubstrings: isAdminUid(uidForName),
+        adminFullBypass: isAdminUid(uidForName),
       });
       if (!nameCheck.ok) {
         if (!cancelled) {
@@ -517,6 +518,7 @@ export default function Home() {
     setNameFieldTouched(true);
     const v = validateDisplayName(nameDraft, {
       ignoreBadSubstrings: isAdminUid(viewerUid),
+      adminFullBypass: isAdminUid(viewerUid),
     });
     if (!v.ok) return;
     setPlayerName(v.name);
@@ -562,7 +564,7 @@ export default function Home() {
                 className="absolute left-0 top-full z-20 mt-1 max-w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-amber-400/35 bg-[#12182a]/98 px-3 py-2.5 text-left text-xs leading-relaxed text-amber-100/95 shadow-xl shadow-black/40"
                 role="tooltip"
               >
-                ゴールドはショップでアイコンを囲むフレームやアイコンの購入などに使えます（準備中）。
+                ゴールドはショップで勝利ブーストなどに使えます。
               </div>
             )}
           </div>
@@ -781,18 +783,23 @@ export default function Home() {
                     {patchSection === "rate" && (
                       <div className="mt-2 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 text-[0.8125rem] leading-relaxed text-white/72 sm:text-sm">
                         <p className="font-semibold text-[#ece5d8]">
-                          キャラ平均手数がちょうど 4 手のとき
+                          勝ち（週次レート）
                         </p>
                         <p className="mt-1.5 text-white/65">
-                          週次レートの「勝ち」は{" "}
+                          増分＝
                           <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            +6 + max(0, 平均−自分の手数)×2
+                            基礎点 + max(0, 4 − 自分の手数)×2
                           </span>
-                          （＋ゴーストがいる場合はさらに{" "}
+                          ＋（VS でゴーストがいる場合）{" "}
                           <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
                             max(0, ゴースト手数−自分の手数)×2
                           </span>
-                          ）。平均が 4 のときの増分だけ抜き出すと次のとおりです。
+                          。基礎点はいまのシーズンレート帯で{" "}
+                          <span className="text-[#ece5d8]">+20 / +15 / +12</span>
+                          （低帯〜高帯）。
+                        </p>
+                        <p className="mt-2 text-white/55">
+                          下表は基礎点 +20（ウォリアー〜マスター帯）のときの例です。
                         </p>
                         <div className="mt-2 overflow-x-auto">
                           <table className="w-full min-w-[16rem] border-collapse text-left text-[0.8125rem] tabular-nums sm:text-sm">
@@ -802,31 +809,31 @@ export default function Home() {
                                   正解までの手数
                                 </th>
                                 <th className="py-1 font-medium">
-                                  週次レート増分（勝ち）
+                                  週次増分（例・基礎20）
                                 </th>
                               </tr>
                             </thead>
                             <tbody className="text-white/80">
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">1</td>
-                                <td className="text-emerald-200/95">+12</td>
+                                <td className="text-emerald-200/95">+26</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">2</td>
-                                <td className="text-emerald-200/95">+10</td>
+                                <td className="text-emerald-200/95">+24</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">3</td>
-                                <td className="text-emerald-200/95">+8</td>
+                                <td className="text-emerald-200/95">+22</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">4</td>
-                                <td className="text-emerald-200/95">+6</td>
+                                <td className="text-emerald-200/95">+20</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">5〜7</td>
                                 <td className="text-emerald-200/95">
-                                  +6（平均より遅いので速度ボーナスなし）
+                                  +20（4 手より遅いので手数ボーナスなし）
                                 </td>
                               </tr>
                             </tbody>
@@ -834,24 +841,11 @@ export default function Home() {
                         </div>
                         <p className="mt-3 text-white/65">
                           <span className="font-semibold text-rose-300/90">負け</span>
-                          （不正解・降参・手数切れ・ゴースト敗北など）の週次レート減少は、
-                          <span className="font-medium text-[#ece5d8]">
-                            そのラウンドで何手使ったかではなく
-                          </span>
-                          、いまのシーズンレートと期待勝率{" "}
-                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            E
-                          </span>{" "}
-                          だけで決まります（手数 1〜7 で式は同じ）。相手レート 1500・自分の週次レートが
-                          1500 のときは{" "}
-                          <span className="tabular-nums text-rose-200/95">約 −16</span>
-                          、2000 のときは{" "}
-                          <span className="tabular-nums text-rose-200/95">約 −30</span>
-                          （いずれも{" "}
-                          <span className="font-mono text-[0.65rem] text-white/70 sm:text-xs">
-                            K=32
-                          </span>
-                          ・上限クリップ前）。
+                          の週次レート減少は、シーズンレート帯で{" "}
+                          <span className="tabular-nums text-rose-200/95">−10</span>{" "}
+                          または{" "}
+                          <span className="tabular-nums text-rose-200/95">−12</span>{" "}
+                          の固定です（ウォリアー〜マスターは −10、それ以外は −12）。
                         </p>
                       </div>
                     )}
@@ -1224,7 +1218,7 @@ export default function Home() {
                   </p>
                   {ratingStats.weeklyResetApplied && (
                     <p className="mt-2 text-xs text-amber-200/85">
-                      週が切り替わったため、レートを1500から再計算しました。
+                      週が切り替わったため、レートを1000から再計算しました。
                     </p>
                   )}
                   {ratingStats.alreadySubmitted ? (

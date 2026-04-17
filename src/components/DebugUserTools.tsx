@@ -30,6 +30,7 @@ export function DebugUserTools() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const loadCurrent = useCallback(async () => {
     setError(null);
@@ -128,6 +129,52 @@ export function DebugUserTools() {
     }
   }, [seasonDraft, lifetimeDraft, goldDraft]);
 
+  const runBulkRating = useCallback(
+    async (mode: "set1000" | "delta") => {
+      const ok =
+        mode === "set1000"
+          ? window.confirm(
+              "全ユーザーのシーズン・累計レートを 1000 にします。よろしいですか？"
+            )
+          : window.confirm(
+              "全ユーザーのレートを -500 します（下限でクランプ）。よろしいですか？"
+            );
+      if (!ok) return;
+      setBulkLoading(true);
+      setError(null);
+      setMessage(null);
+      try {
+        await ensureAnonymousSession();
+        const auth = getFirebaseAuth();
+        const idToken = await auth.currentUser?.getIdToken();
+        if (!idToken) {
+          setError("ログインできませんでした");
+          return;
+        }
+        const res = await fetch("/api/admin/bulk-rating", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken, mode }),
+        });
+        const json = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          updated?: number;
+        };
+        if (!json?.ok) {
+          setError(json?.error ?? "一括更新に失敗しました");
+          return;
+        }
+        setMessage(`一括更新しました（${json.updated ?? 0} 件）。`);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBulkLoading(false);
+      }
+    },
+    []
+  );
+
   if (!showAdminTools) return null;
 
   return (
@@ -151,7 +198,7 @@ export function DebugUserTools() {
             if (e.target === e.currentTarget) setOpen(false);
           }}
         >
-          <div className="w-full max-w-sm rounded-2xl border border-rose-500/35 bg-[#1a0a0f] p-5 shadow-2xl shadow-black/60">
+          <div className="w-full max-w-md rounded-2xl border border-rose-500/35 bg-[#1a0a0f] p-5 shadow-2xl shadow-black/60">
             <div className="flex items-start justify-between gap-2">
               <h2
                 id="debug-user-title"
@@ -169,9 +216,40 @@ export function DebugUserTools() {
               </button>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-rose-200/70">
-              自分の Firestore ユーザーを直接書き換えます。管理者モードと
-              localhost で表示されます。
+              自分のレート・ゴールドを直接書き換えます。管理者 UID
+              でパスワード解除後に表示されます。
             </p>
+
+            <div className="mt-4 rounded-xl border border-amber-500/30 bg-black/25 p-3">
+              <p className="text-xs font-medium text-amber-200/90">
+                全ユーザー一括（要サーバー設定）
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-white/45">
+                Vercel にサービスアカウント JSON（
+                <span className="font-mono text-amber-200/80">
+                  FIREBASE_SERVICE_ACCOUNT_JSON
+                </span>
+                ）が無いと失敗します。
+              </p>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  disabled={bulkLoading}
+                  onClick={() => void runBulkRating("set1000")}
+                  className="flex-1 rounded-lg border border-amber-500/40 bg-amber-950/50 px-3 py-2 text-xs font-medium text-amber-100 hover:bg-amber-950/70 disabled:opacity-50"
+                >
+                  {bulkLoading ? "処理中…" : "全員レート 1000"}
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkLoading}
+                  onClick={() => void runBulkRating("delta")}
+                  className="flex-1 rounded-lg border border-amber-500/40 bg-amber-950/50 px-3 py-2 text-xs font-medium text-amber-100 hover:bg-amber-950/70 disabled:opacity-50"
+                >
+                  {bulkLoading ? "処理中…" : "全員 -500"}
+                </button>
+              </div>
+            </div>
 
             <div className="mt-4 space-y-3">
               <label className="block">

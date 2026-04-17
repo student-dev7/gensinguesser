@@ -15,9 +15,9 @@ import {
   applyWinRatingBonus,
   clampLifetimeTotalRate,
   clampRating,
-  computeNewPlayerRating,
   DEFAULT_INITIAL_RATING,
   expectedScore,
+  getSeasonWinBaseAndLoss,
 } from "@/lib/elo";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
@@ -216,7 +216,10 @@ export async function POST(req: Request) {
 
   const nameCheck = validateDisplayName(
     typeof rawDisplayName === "string" ? rawDisplayName : "",
-    { ignoreBadSubstrings: isAdminUid(uid) }
+    {
+      ignoreBadSubstrings: isAdminUid(uid),
+      adminFullBypass: isAdminUid(uid),
+    }
   );
   if (!nameCheck.ok) {
     return NextResponse.json(
@@ -378,6 +381,7 @@ export async function POST(req: Request) {
         let winBaseBonus: number | undefined;
         let winSpeedBonus: number | undefined;
         let ghostBeatBonus: number | undefined;
+        let consumeNextWinDouble = false;
 
         if (personalMode) {
           newRating = Rp;
@@ -390,7 +394,6 @@ export async function POST(req: Request) {
         } else if (won) {
           const win = applyWinRatingBonus(
             Rp,
-            averageHandCount,
             storedHandCount,
             ghostHc !== undefined
               ? { ghostHandCount: ghostHc }
@@ -401,14 +404,23 @@ export async function POST(req: Request) {
           winBaseBonus = win.baseBonus;
           winSpeedBonus = win.speedBonus;
           ghostBeatBonus = win.ghostBeatBonus;
+          const hasNextWinDouble =
+            userSnap.exists() &&
+            (userData as { next_win_rating_double?: unknown })
+              .next_win_rating_double === true;
+          if (hasNextWinDouble) {
+            ratingDelta = ratingDelta * 2;
+            newRating = clampRating(Rp + ratingDelta);
+            consumeNextWinDouble = true;
+          }
           eloActualScore = 1;
           eloExpected = expectedScore(Rp, DEFAULT_INITIAL_RATING);
         } else {
-          const loss = computeNewPlayerRating(Rp, 0);
-          newRating = loss.newRating;
-          ratingDelta = loss.ratingDelta;
-          eloActualScore = loss.S;
-          eloExpected = loss.E;
+          const { lossPenalty } = getSeasonWinBaseAndLoss(Rp);
+          ratingDelta = -lossPenalty;
+          newRating = clampRating(Rp + ratingDelta);
+          eloActualScore = 0;
+          eloExpected = expectedScore(Rp, DEFAULT_INITIAL_RATING);
         }
 
         const gamesAfter = gamesBefore + 1;
@@ -454,6 +466,7 @@ export async function POST(req: Request) {
               ratingWeekKey: currentWeekKey,
               updatedAt: serverTimestamp(),
               ...(goldEarned > 0 ? { gold: increment(goldEarned) } : {}),
+              ...(consumeNextWinDouble ? { next_win_rating_double: false } : {}),
             },
             { merge: true }
           );

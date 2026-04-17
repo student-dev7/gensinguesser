@@ -106,6 +106,7 @@ export function ChatRoomPanel(props: {
   const displayNameForSend = useMemo(() => {
     const v = validateDisplayName(props.playerName, {
       ignoreBadSubstrings: myUid != null && isAdminUid(myUid),
+      adminFullBypass: myUid != null && isAdminUid(myUid),
     });
     return v.ok ? v.name : "旅人";
   }, [props.playerName, myUid]);

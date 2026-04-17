@@ -3,8 +3,9 @@
  * カンマ区切りで追加: NEXT_PUBLIC_ADMIN_UIDS=uid1,uid2
  * 他人のチャット削除を許可する場合は firestore.rules の delete 条件も合わせて更新すること。
  */
-/** 組み込み管理者 UID（空＝本番では誰も管理者にならない） */
-const BUILTIN_ADMIN_UIDS = new Set<string>([]);
+import { BUILTIN_ADMIN_UID } from "@/lib/builtinAdmin";
+
+const BUILTIN_ADMIN_UIDS = new Set<string>([BUILTIN_ADMIN_UID]);
 
 function adminUidsFromEnv(): Set<string> {
   const raw = process.env.NEXT_PUBLIC_ADMIN_UIDS ?? "";

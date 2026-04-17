@@ -4,6 +4,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isBuiltinAdmin() {
+      return request.auth != null
+        && request.auth.uid == 'aFm36xAmMEQhJ6nhOumClvbASY32';
+    }
+
     match /users/{userId} {
       allow read: if true;
       // write だと delete も許可されるため create/update のみ
@@ -31,7 +36,6 @@ service cloud.firestore {
     }
 
     // ロビーチャット（匿名 UID で送受信）
-    // hasOnly だとフィールド追加のたびにルール更新が必要。hasAll なら必須キーだけ揃えばよく、任意フィールドを後から足しやすい
     match /chat_messages/{msgId} {
       allow read: if true;
       allow create: if request.auth != null
@@ -42,13 +46,14 @@ service cloud.firestore {
         && request.resource.data.text.size() <= 80
         && request.resource.data.displayName is string
         && request.resource.data.displayName.size() >= 1
-        && request.resource.data.displayName.size() <= 12
-        // serverTimestamp() 相当（クライアントが時刻を偽装できない）
+        && (
+          (!isBuiltinAdmin() && request.resource.data.displayName.size() <= 12)
+          || (isBuiltinAdmin() && request.resource.data.displayName.size() <= 80)
+        )
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      // 自分のメッセージのみ削除可（モデレーター削除は未使用のため無効）
       allow delete: if request.auth != null
-        && resource.data.uid == request.auth.uid;
+        && (resource.data.uid == request.auth.uid || isBuiltinAdmin());
     }
   }
 }

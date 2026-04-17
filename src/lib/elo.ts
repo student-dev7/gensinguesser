@@ -27,10 +27,22 @@ export function clampLifetimeTotalRate(rating: number) {
   return Math.max(MIN_RATING, Math.min(MAX_LIFETIME_TOTAL_RATE, rating));
 }
 
-/** 新規ユーザー・仮想対戦相手のベースレート・週次リセット時の基準 */
-export const DEFAULT_INITIAL_RATING = 1500;
-const DEFAULT_OPPONENT_RATING = 1500;
-const DEFAULT_K_FACTOR = 32;
+/** 新規ユーザー・週次リセット後の基準（全ユーザー一律 1000 スタート） */
+export const DEFAULT_INITIAL_RATING = 1000;
+const DEFAULT_OPPONENT_RATING = 1000;
+
+/**
+ * シーズン（週次）レート帯ごとの勝利基礎点・敗北時の減少pt。
+ */
+export function getSeasonWinBaseAndLoss(seasonRating: number): {
+  winBase: number;
+  lossPenalty: number;
+} {
+  const r = clampRating(seasonRating);
+  if (r < 1720) return { winBase: 20, lossPenalty: 10 };
+  if (r < 2800) return { winBase: 15, lossPenalty: 12 };
+  return { winBase: 12, lossPenalty: 12 };
+}
 
 export type ComputeRatingOptions = {
   opponentRating?: number;
@@ -38,9 +50,7 @@ export type ComputeRatingOptions = {
 };
 
 /**
- * Elo 更新: 実際のスコア S（0〜1）と期待スコア E の差で増減する。
- * - S=1 勝ち, S=0 負け, S=0.5 引き分け想定
- * （負け・降参時のレート減少に使用）
+ * Elo 更新（個人モード等で使用する場合あり）
  */
 export function computeNewPlayerRating(
   currentRating: number,
@@ -48,7 +58,7 @@ export function computeNewPlayerRating(
   options?: ComputeRatingOptions
 ) {
   const opponentRating = options?.opponentRating ?? DEFAULT_OPPONENT_RATING;
-  const k = options?.kFactor ?? DEFAULT_K_FACTOR;
+  const k = options?.kFactor ?? 32;
   const S = Math.max(0, Math.min(1, actualScore));
   const E = expectedScore(currentRating, opponentRating);
   const newRating = clampRating(currentRating + k * (S - E));
@@ -60,35 +70,32 @@ export function computeNewPlayerRating(
   };
 }
 
-/** 正解時: 最低 +6 に加え、(平均手数 − 自分の手数)×2 を上乗せ（平均より遅い場合は 0） */
-const WIN_BASE_BONUS = 6;
 const WIN_SPEED_MULTIPLIER = 2;
 
 export type ApplyWinRatingBonusOptions = {
-  /**
-   * 擬似対戦のゴーストの正解手数。指定時は (ゴースト手数 − 自分の手数)×係数 を追加（負け越しは呼び出し側で負け処理に回すこと）。
-   */
   ghostHandCount?: number;
 };
 
+/**
+ * 勝利時: 増分 = 基礎点 + max(0, 4 - 自分の手数) × 2 +（VS 時）ゴースト撃破ボーナス
+ */
 export function applyWinRatingBonus(
-  currentRating: number,
-  averageHandCount: number,
+  seasonRating: number,
   myHandCount: number,
   options?: ApplyWinRatingBonusOptions
 ) {
-  const speedBonus =
-    Math.max(0, averageHandCount - myHandCount) * WIN_SPEED_MULTIPLIER;
+  const { winBase } = getSeasonWinBaseAndLoss(seasonRating);
+  const speedBonus = Math.max(0, 4 - myHandCount) * WIN_SPEED_MULTIPLIER;
   const ghostBeatBonus =
     options?.ghostHandCount !== undefined
       ? Math.max(0, options.ghostHandCount - myHandCount) * WIN_SPEED_MULTIPLIER
       : 0;
-  const ratingDelta = WIN_BASE_BONUS + speedBonus + ghostBeatBonus;
-  const newRating = clampRating(currentRating + ratingDelta);
+  const ratingDelta = winBase + speedBonus + ghostBeatBonus;
+  const newRating = clampRating(seasonRating + ratingDelta);
   return {
     newRating,
     ratingDelta,
-    baseBonus: WIN_BASE_BONUS,
+    baseBonus: winBase,
     speedBonus,
     ghostBeatBonus,
   };
