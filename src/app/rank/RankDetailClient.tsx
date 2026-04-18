@@ -10,7 +10,7 @@ import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "@/lib/firebaseClient";
-import { rateForRankDisplay } from "@/lib/rankUtils";
+import { seasonRateForRankFromUserData } from "@/lib/rankUtils";
 
 export function RankDetailClient() {
   const [seasonRating, setSeasonRating] = useState<number | null>(null);
@@ -48,23 +48,11 @@ export function RankDetailClient() {
           }
           return;
         }
-        const d = snap.data();
-        const season =
-          typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
-            ? d.current_rate
-            : typeof d?.rating === "number" && Number.isFinite(d.rating)
-              ? d.rating
-              : DEFAULT_INITIAL_RATING;
-        const lifetime =
-          typeof d?.lifetime_total_rate === "number" &&
-          Number.isFinite(d.lifetime_total_rate)
-            ? d.lifetime_total_rate
-            : typeof d?.rating === "number" && Number.isFinite(d.rating)
-              ? d.rating
-              : DEFAULT_INITIAL_RATING;
+        const d = snap.data() as Record<string, unknown>;
+        const season = seasonRateForRankFromUserData(d);
         if (!cancelled) {
           setSeasonRating(season);
-          setLifetimeTotalRate(lifetime);
+          setLifetimeTotalRate(season);
         }
       } catch {
         if (!cancelled) {
@@ -81,7 +69,10 @@ export function RankDetailClient() {
     };
   }, []);
 
-  const rankRate = rateForRankDisplay(lifetimeTotalRate);
+  const rankRate =
+    lifetimeTotalRate != null && Number.isFinite(lifetimeTotalRate)
+      ? lifetimeTotalRate
+      : DEFAULT_INITIAL_RATING;
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] px-4 py-8 text-white sm:py-12">
@@ -94,7 +85,7 @@ export function RankDetailClient() {
             ランク詳細
           </h1>
           <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-white/55">
-            累計レートに基づくランク・ティア・昇格までのポイントを表示します。
+            シーズンレートに基づくランク・ティア・昇格までのポイントを表示します。
           </p>
           <div className="mt-8">
             <Link

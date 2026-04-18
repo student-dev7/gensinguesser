@@ -11,36 +11,41 @@ export function handScoreFromAvg(myHandCount: number, mAvgHandCount: number) {
   return Math.max(0, Math.min(1, s));
 }
 
-/** プレイヤーレートの下限（週次リセット後の基準は DEFAULT_INITIAL_RATING） */
+/** プレイヤーレートの下限（週次調整後もこれ未満にならない） */
 export const MIN_RATING = 1000;
-/** シーズン／週次の current_rate・rating の上限 */
-export const MAX_RATING = 5000;
-/** Firestore の累計レート lifetime_total_rate の上限 */
-export const MAX_LIFETIME_TOTAL_RATE = 9999;
+/** シーズン current_rate・rating の上限（Iミシックは事実上無制限に近い） */
+export const MAX_RATING = 9_999_999;
+/** Firestore lifetime_total_rate（シーズン値と同期）の上限 */
+export const MAX_LIFETIME_TOTAL_RATE = MAX_RATING;
 
 export function clampRating(rating: number) {
   return Math.max(MIN_RATING, Math.min(MAX_RATING, rating));
 }
 
-/** 累計レート（ランク表示・昇格の基準）のみ 9999 まで許可 */
 export function clampLifetimeTotalRate(rating: number) {
   return Math.max(MIN_RATING, Math.min(MAX_LIFETIME_TOTAL_RATE, rating));
 }
 
-/** 新規ユーザー・週次リセット後の基準（全ユーザー一律 1000 スタート） */
+/** 新規ユーザー・初回の基準（全ユーザー一律 1000 スタート） */
 export const DEFAULT_INITIAL_RATING = 1000;
+
+/** 週が変わったときシーズンレートから減らす量（`clampRating(Rp - この値)`） */
+export const WEEKLY_RATING_DROP = 1000;
 const DEFAULT_OPPONENT_RATING = 1000;
 
 /**
- * シーズン（週次）レート帯ごとの勝利基礎点・敗北時の減少pt。
+ * シーズンレート帯ごとの勝利基礎点・敗北時の減少pt。
+ * 序盤: ウォリアー〜マスター（〜2439）
+ * 中盤: グランドマスター〜レジェンド（2440〜4599）
+ * 終盤: ミシック以上（4600〜）
  */
 export function getSeasonWinBaseAndLoss(seasonRating: number): {
   winBase: number;
   lossPenalty: number;
 } {
   const r = clampRating(seasonRating);
-  if (r < 1720) return { winBase: 20, lossPenalty: 10 };
-  if (r < 2800) return { winBase: 15, lossPenalty: 12 };
+  if (r < 2440) return { winBase: 20, lossPenalty: 10 };
+  if (r < 4600) return { winBase: 15, lossPenalty: 12 };
   return { winBase: 12, lossPenalty: 12 };
 }
 
@@ -70,33 +75,29 @@ export function computeNewPlayerRating(
   };
 }
 
-const WIN_SPEED_MULTIPLIER = 2;
-
-export type ApplyWinRatingBonusOptions = {
-  ghostHandCount?: number;
-};
+const HAND_AVG_BONUS = 3;
 
 /**
- * 勝利時: 増分 = 基礎点 + max(0, 4 - 自分の手数) × 2 +（VS 時）ゴースト撃破ボーナス
+ * 勝利時: 増分 = 段階別基礎点 +（そのキャラの平均手数より少ない場合 +3）
+ * characterAverageHands は当該プレイ反映前のキャラ別平均（pureMeanHandCount）
  */
 export function applyWinRatingBonus(
   seasonRating: number,
   myHandCount: number,
-  options?: ApplyWinRatingBonusOptions
+  characterAverageHands: number
 ) {
   const { winBase } = getSeasonWinBaseAndLoss(seasonRating);
-  const speedBonus = Math.max(0, 4 - myHandCount) * WIN_SPEED_MULTIPLIER;
-  const ghostBeatBonus =
-    options?.ghostHandCount !== undefined
-      ? Math.max(0, options.ghostHandCount - myHandCount) * WIN_SPEED_MULTIPLIER
+  const handAvgBonus =
+    Number.isFinite(characterAverageHands) &&
+    myHandCount < characterAverageHands
+      ? HAND_AVG_BONUS
       : 0;
-  const ratingDelta = winBase + speedBonus + ghostBeatBonus;
+  const ratingDelta = winBase + handAvgBonus;
   const newRating = clampRating(seasonRating + ratingDelta);
   return {
     newRating,
     ratingDelta,
     baseBonus: winBase,
-    speedBonus,
-    ghostBeatBonus,
+    handAvgBonus,
   };
 }

@@ -8,17 +8,14 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import {
-  clampLifetimeTotalRate,
-  clampRating,
-  DEFAULT_INITIAL_RATING,
-} from "@/lib/elo";
+import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/elo";
 import { DEBUG_USER_UPDATED_EVENT } from "@/lib/debugUserEvents";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "@/lib/firebaseClient";
 import { useAdminMode } from "@/components/AdminModeProvider";
+import { seasonRateForRankFromUserData } from "@/lib/rankUtils";
 
 export function DebugUserTools() {
   const { showAdminTools } = useAdminMode();
@@ -52,24 +49,12 @@ export function DebugUserTools() {
         setGoldDraft("0");
         return;
       }
-      const d = snap.data();
-      const season =
-        typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
-          ? d.current_rate
-          : typeof d?.rating === "number" && Number.isFinite(d.rating)
-            ? d.rating
-            : DEFAULT_INITIAL_RATING;
-      const lifetime =
-        typeof d?.lifetime_total_rate === "number" &&
-        Number.isFinite(d.lifetime_total_rate)
-          ? d.lifetime_total_rate
-          : typeof d?.rating === "number" && Number.isFinite(d.rating)
-            ? d.rating
-            : DEFAULT_INITIAL_RATING;
+      const d = snap.data() as Record<string, unknown>;
+      const season = seasonRateForRankFromUserData(d);
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
       setSeasonDraft(String(Math.round(season)));
-      setLifetimeDraft(String(Math.round(lifetime)));
+      setLifetimeDraft(String(Math.round(season)));
       setGoldDraft(String(Math.round(g)));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -96,18 +81,13 @@ export function DebugUserTools() {
         return;
       }
       const season = Number(seasonDraft);
-      const lifetime = Number(lifetimeDraft);
       const g = Number(goldDraft);
-      if (
-        !Number.isFinite(season) ||
-        !Number.isFinite(lifetime) ||
-        !Number.isFinite(g)
-      ) {
+      if (!Number.isFinite(season) || !Number.isFinite(g)) {
         setError("数値が不正です");
         return;
       }
       const cr = clampRating(season);
-      const lt = clampLifetimeTotalRate(lifetime);
+      const lt = cr;
       const db = getFirestore(auth.app);
       await setDoc(
         doc(db, "users", uid),
@@ -127,14 +107,14 @@ export function DebugUserTools() {
     } finally {
       setSaving(false);
     }
-  }, [seasonDraft, lifetimeDraft, goldDraft]);
+  }, [seasonDraft, goldDraft]);
 
   const runBulkRating = useCallback(
     async (mode: "set1000" | "delta") => {
       const ok =
         mode === "set1000"
           ? window.confirm(
-              "全ユーザーのシーズン・累計レートを 1000 にします。よろしいですか？"
+              "全ユーザーのシーズンレート（互換フィールド含む）を 1000 にします。よろしいですか？"
             )
           : window.confirm(
               "全ユーザーのレートを -500 します（下限でクランプ）。よろしいですか？"
@@ -260,22 +240,26 @@ export function DebugUserTools() {
                   type="number"
                   inputMode="numeric"
                   value={seasonDraft}
-                  onChange={(e) => setSeasonDraft(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSeasonDraft(v);
+                    setLifetimeDraft(v);
+                  }}
                   disabled={loadingDoc}
                   className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none focus:border-rose-400/50"
                 />
               </label>
               <label className="block">
                 <span className="text-xs text-white/60">
-                  累計レート（lifetime_total_rate）
+                  互換 lifetime_total_rate（保存時は上と同じ値が入ります）
                 </span>
                 <input
                   type="number"
                   inputMode="numeric"
                   value={lifetimeDraft}
-                  onChange={(e) => setLifetimeDraft(e.target.value)}
+                  readOnly
                   disabled={loadingDoc}
-                  className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none focus:border-rose-400/50"
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm tabular-nums text-white/50 outline-none"
                 />
               </label>
               <label className="block">

@@ -33,6 +33,7 @@ import {
   formatRankTierLine,
   getRankData,
   rateForRankDisplay,
+  seasonRateForRankFromUserData,
 } from "../lib/rankUtils";
 import { isAdminUid } from "../lib/adminUids";
 import { validateDisplayName } from "../lib/validateDisplayName";
@@ -92,9 +93,9 @@ export function ChatRoomPanel(props: {
   const [myUid, setMyUid] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [clearingAll, setClearingAll] = useState(false);
-  /** uid → 累計レート由来のランク表示ラベル（再レンダー用に tick と併用） */
+  /** uid → シーズンレート由来のランク表示ラベル（再レンダー用に tick と併用） */
   const rankLabelRef = useRef<Record<string, string>>({});
-  /** ランクロゴ用（rateForRankDisplay 済みの累計レート） */
+  /** ランクロゴ用（rateForRankDisplay 済みのシーズンレート） */
   const rankDisplayRatingRef = useRef<Record<string, number | undefined>>({});
   const [rankLabelsTick, setRankLabelsTick] = useState(0);
 
@@ -216,21 +217,9 @@ export function ChatRoomPanel(props: {
               const snap = await getDoc(doc(db, "users", uid));
               let lt = DEFAULT_INITIAL_RATING;
               if (snap.exists()) {
-                const d = snap.data() as {
-                  lifetime_total_rate?: unknown;
-                  rating?: unknown;
-                };
-                if (
-                  typeof d.lifetime_total_rate === "number" &&
-                  Number.isFinite(d.lifetime_total_rate)
-                ) {
-                  lt = d.lifetime_total_rate;
-                } else if (
-                  typeof d.rating === "number" &&
-                  Number.isFinite(d.rating)
-                ) {
-                  lt = d.rating;
-                }
+                lt = seasonRateForRankFromUserData(
+                  snap.data() as Record<string, unknown>
+                );
               }
               const displayRate = rateForRankDisplay(lt);
               rankDisplayRatingRef.current[uid] = displayRate;

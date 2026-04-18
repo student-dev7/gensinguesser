@@ -17,6 +17,7 @@ import { DEBUG_USER_UPDATED_EVENT } from "../lib/debugUserEvents";
 import { useAdminMode } from "@/components/AdminModeProvider";
 import { isAdminUid } from "../lib/adminUids";
 import { validateDisplayName } from "../lib/validateDisplayName";
+import { seasonRateForRankFromUserData } from "../lib/rankUtils";
 
 type Character = (typeof CHARACTERS)[number];
 
@@ -71,7 +72,7 @@ type RatingStats = {
   goldEarned?: number;
   /** 反映後の累計ゴールド */
   goldTotal?: number;
-  /** 累計レートでティアまたはランク帯が一段上がった（この送信で初めて記録したときのみ） */
+  /** シーズンレートでティアまたはランク帯が一段上がった（この送信で初めて記録したときのみ） */
   lifetimeTierPromoted?: boolean;
   /** 昇格後の表示ラベル（例: ウォリアー III） */
   promotedToRankLabel?: string;
@@ -101,7 +102,7 @@ export default function Home() {
   const submitDoneRoundRef = useRef<string | null>(null);
   /** null = 読み込み中 */
   const [totalGold, setTotalGold] = useState<number | null>(null);
-  /** Firestore lifetime_total_rate（累計・ランク表示の基準） */
+  /** シーズンレート（ランク表示の基準。state 名は互換のため維持） */
   const [lifetimeTotalRate, setLifetimeTotalRate] = useState<number | null>(
     null
   );
@@ -142,18 +143,11 @@ export default function Home() {
         setUserProfileLoading(false);
         return;
       }
-      const d = snap.data();
+      const d = snap.data() as Record<string, unknown>;
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
-      const lifetime =
-        typeof d?.lifetime_total_rate === "number" &&
-        Number.isFinite(d.lifetime_total_rate)
-          ? d.lifetime_total_rate
-          : typeof d?.rating === "number" && Number.isFinite(d.rating)
-            ? d.rating
-            : DEFAULT_INITIAL_RATING;
       setTotalGold(g);
-      setLifetimeTotalRate(lifetime);
+      setLifetimeTotalRate(seasonRateForRankFromUserData(d));
     } catch {
       setTotalGold(0);
       setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
@@ -716,13 +710,13 @@ export default function Home() {
                             です。同じ手数の時点ではまだ続行できます。
                           </li>
                           <li>
-                            正解すればクリアで週次レートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。ゴーストより少ない手数で当てるほどボーナスが増えます。
+                            正解すればクリアで週次レートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。勝ちのとき、そのキャラの全プレイ平均手数より少ない手数で正解すると +3 ポイントのボーナスが付きます。
                           </li>
                           <li>
                             <span className="font-medium text-[#ece5d8]">個人モード</span>
                             ではゴーストは出ず、
                             <span className="font-medium text-amber-200/90">
-                              週次・累計レート・ゴールドは一切変動しません
+                              週次レート・ゴールドは一切変動しません
                             </span>
                             （練習向け）。
                           </li>
@@ -740,7 +734,7 @@ export default function Home() {
                       className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
                       aria-expanded={patchSection === "stats"}
                     >
-                      キャラ統計・累計レートについて
+                      キャラ統計・シーズンレートについて
                     </button>
                     {patchSection === "stats" && (
                       <div className="space-y-2.5 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 leading-relaxed text-white/72">
@@ -755,15 +749,13 @@ export default function Home() {
                         </p>
                         <p>
                           <span className="font-semibold text-[#ece5d8]">
-                            累計レート（lifetime_total_rate）
+                            シーズンレート（current_rate / rating）
                           </span>
-                          は敗北や週次の減点では
-                          <span className="font-medium text-emerald-200/90">減りません</span>
-                          。勝ちで増えた分だけ上がります（ランク表示の基準）。上限は
-                          <span className="tabular-nums font-medium text-amber-200/95">
-                            9999
+                          がランク表示の基準です。勝ちで増え、負けで減ります。毎週月曜（日本時間）に
+                          <span className="font-medium text-amber-200/90">
+                            現在のレートから 1000 減少
                           </span>
-                          です。週次レートの上限は従来どおりです。
+                          します（下限 1000）。
                         </p>
                       </div>
                     )}
@@ -788,18 +780,16 @@ export default function Home() {
                         <p className="mt-1.5 text-white/65">
                           増分＝
                           <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            基礎点 + max(0, 4 − 自分の手数)×2
+                            基礎点
                           </span>
-                          ＋（VS でゴーストがいる場合）{" "}
-                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            max(0, ゴースト手数−自分の手数)×2
-                          </span>
-                          。基礎点はいまのシーズンレート帯で{" "}
+                          ＋（そのキャラの全プレイ平均手数より自分の正解手数が少ないとき{" "}
+                          <span className="tabular-nums text-emerald-200/95">+3</span>
+                          ）。基礎点はシーズンレート帯で{" "}
                           <span className="text-[#ece5d8]">+20 / +15 / +12</span>
-                          （低帯〜高帯）。
+                          （序盤ウォリアー〜マスター／中盤グランドマスター〜レジェンド／終盤ミシック〜）。
                         </p>
                         <p className="mt-2 text-white/55">
-                          下表は基礎点 +20（ウォリアー〜マスター帯）のときの例です。
+                          下表は基礎点 +20（序盤帯）かつ平均手数より遅い／早い場合の例です。
                         </p>
                         <div className="mt-2 overflow-x-auto">
                           <table className="w-full min-w-[16rem] border-collapse text-left text-[0.8125rem] tabular-nums sm:text-sm">
@@ -809,31 +799,19 @@ export default function Home() {
                                   正解までの手数
                                 </th>
                                 <th className="py-1 font-medium">
-                                  週次増分（例・基礎20）
+                                  週次増分（例）
                                 </th>
                               </tr>
                             </thead>
                             <tbody className="text-white/80">
                               <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">1</td>
-                                <td className="text-emerald-200/95">+26</td>
+                                <td className="py-1 pr-3">平均より遅い手数</td>
+                                <td className="text-emerald-200/95">+20（序盤帯の例）</td>
                               </tr>
                               <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">2</td>
-                                <td className="text-emerald-200/95">+24</td>
-                              </tr>
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">3</td>
-                                <td className="text-emerald-200/95">+22</td>
-                              </tr>
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">4</td>
-                                <td className="text-emerald-200/95">+20</td>
-                              </tr>
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">5〜7</td>
+                                <td className="py-1 pr-3">平均より早い手数</td>
                                 <td className="text-emerald-200/95">
-                                  +20（4 手より遅いので手数ボーナスなし）
+                                  +23（+20 ＋ +3）
                                 </td>
                               </tr>
                             </tbody>
@@ -845,7 +823,7 @@ export default function Home() {
                           <span className="tabular-nums text-rose-200/95">−10</span>{" "}
                           または{" "}
                           <span className="tabular-nums text-rose-200/95">−12</span>{" "}
-                          の固定です（ウォリアー〜マスターは −10、それ以外は −12）。
+                          です（序盤は −10、中盤・終盤は −12）。
                         </p>
                       </div>
                     )}
@@ -1153,7 +1131,7 @@ export default function Home() {
                     {ratingStats.promotedToRankLabel}
                   </p>
                   <p className="mt-1.5 text-xs text-white/50">
-                    累計レートの到達で新しいティア／ランク帯に到達しました
+                    シーズンレートの到達で新しいティア／ランク帯に到達しました
                   </p>
                 </div>
               )}
@@ -1218,7 +1196,8 @@ export default function Home() {
                   </p>
                   {ratingStats.weeklyResetApplied && (
                     <p className="mt-2 text-xs text-amber-200/85">
-                      週が切り替わったため、レートを1000から再計算しました。
+                      週が切り替わったため、シーズンレートを 1000
+                      下げて再計算しました（下限 1000）。
                     </p>
                   )}
                   {ratingStats.alreadySubmitted ? (

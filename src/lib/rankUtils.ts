@@ -1,16 +1,48 @@
 import { DEFAULT_INITIAL_RATING, MIN_RATING } from "./elo";
 
 /**
- * 【ランク表示の基準：累計レート（lifetime_total_rate）】
+ * 【ランク表示の基準：シーズンレート（current_rate / rating）】
+ * Firestore の lifetime_total_rate は互換のためシーズン値と同期する。
  */
 
+/** Gミシック（mythic-glory）の下限 */
+export const GLORY_MYTHIC_MIN = 5800;
+/** Iミシック（mythic-immortal）の下限 */
+export const IMMORTAL_MYTHIC_MIN = 7400;
+
+/** @deprecated 互換: Gミシック下限 */
+export const MYTHIC_GLORY_MIN = GLORY_MYTHIC_MIN;
+
 export function rateForRankDisplay(
-  lifetimeTotalRate: number | null | undefined
+  seasonOrLegacyRate: number | null | undefined
 ): number {
-  if (lifetimeTotalRate == null || !Number.isFinite(lifetimeTotalRate)) {
+  if (
+    seasonOrLegacyRate == null ||
+    !Number.isFinite(seasonOrLegacyRate)
+  ) {
     return DEFAULT_INITIAL_RATING;
   }
-  return lifetimeTotalRate;
+  return seasonOrLegacyRate;
+}
+
+/** users ドキュメントからシーズンレート（ランク表示用）を取得 */
+export function seasonRateForRankFromUserData(
+  d: Record<string, unknown> | undefined
+): number {
+  if (!d) return DEFAULT_INITIAL_RATING;
+  const cr = d.current_rate;
+  if (typeof cr === "number" && Number.isFinite(cr)) {
+    return Math.max(MIN_RATING, cr);
+  }
+  const rt = d.rating;
+  if (typeof rt === "number" && Number.isFinite(rt)) {
+    return Math.max(MIN_RATING, rt);
+  }
+  const lt = d.lifetime_total_rate;
+  if (typeof lt === "number" && Number.isFinite(lt)) {
+    return Math.max(MIN_RATING, lt);
+  }
+  return DEFAULT_INITIAL_RATING;
 }
 
 export type RomanTier = "IV" | "III" | "II" | "I";
@@ -43,42 +75,74 @@ export type TierProgress = {
 
 const ROMAN_BY_INDEX: RomanTier[] = ["IV", "III", "II", "I"];
 
-export const GLORY_MYTHIC_MIN = 3240;
-export const IMMORTAL_MYTHIC_MIN = 3720;
-
 type RankBand = {
   id: Exclude<RankId, "mythic-immortal">;
   nameJa: string;
+  /** 含む */
   min: number;
-  max: number;
+  /** 含まない（[min, maxExclusive)） */
+  maxExclusive: number;
   tierWidth: number;
 };
 
 export const RANK_BANDS: readonly RankBand[] = [
-  { id: "warrior", nameJa: "ウォリアー", min: 1000, max: 1199, tierWidth: 50 },
-  { id: "elite", nameJa: "エリート", min: 1200, max: 1439, tierWidth: 60 },
-  { id: "master", nameJa: "マスター", min: 1440, max: 1719, tierWidth: 70 },
+  {
+    id: "warrior",
+    nameJa: "ウォリアー",
+    min: 1000,
+    maxExclusive: 1400,
+    tierWidth: 100,
+  },
+  {
+    id: "elite",
+    nameJa: "エリート",
+    min: 1400,
+    maxExclusive: 1880,
+    tierWidth: 120,
+  },
+  {
+    id: "master",
+    nameJa: "マスター",
+    min: 1880,
+    maxExclusive: 2440,
+    tierWidth: 140,
+  },
   {
     id: "grandmaster",
     nameJa: "グランドマスター",
-    min: 1720,
-    max: 2039,
-    tierWidth: 80,
+    min: 2440,
+    maxExclusive: 3080,
+    tierWidth: 160,
   },
-  { id: "epic", nameJa: "エピック", min: 2040, max: 2399, tierWidth: 90 },
-  { id: "legend", nameJa: "レジェンド", min: 2400, max: 2799, tierWidth: 100 },
-  { id: "mythic", nameJa: "ミシック", min: 2800, max: 3239, tierWidth: 110 },
+  {
+    id: "epic",
+    nameJa: "エピック",
+    min: 3080,
+    maxExclusive: 3800,
+    tierWidth: 180,
+  },
+  {
+    id: "legend",
+    nameJa: "レジェンド",
+    min: 3800,
+    maxExclusive: 4600,
+    tierWidth: 200,
+  },
+  {
+    id: "mythic",
+    nameJa: "ミシック",
+    min: 4600,
+    maxExclusive: 5800,
+    tierWidth: 300,
+  },
   {
     id: "mythic-glory",
     nameJa: "Gミシック",
-    min: 3240,
-    max: 3719,
-    tierWidth: 120,
+    min: 5800,
+    maxExclusive: 7400,
+    tierWidth: 400,
   },
 ] as const;
-
-/** @deprecated 互換: Gミシック下限 */
-export const MYTHIC_GLORY_MIN = GLORY_MYTHIC_MIN;
 
 export function rankImagePath(rankId: RankId): string {
   return `/assets/ranks/${rankId}.png`;
@@ -97,12 +161,12 @@ export function getRankRangeTableRows(): {
   const rows = RANK_BANDS.map((b) => ({
     rankId: b.id as RankId,
     rankName: b.nameJa,
-    rangeLabel: `${b.min} 〜 ${b.max}`,
+    rangeLabel: `${b.min} 以上 ${b.maxExclusive} 未満`,
   }));
   rows.push({
     rankId: "mythic-immortal",
     rankName: "Iミシック",
-    rangeLabel: `${IMMORTAL_MYTHIC_MIN} 〜`,
+    rangeLabel: `${IMMORTAL_MYTHIC_MIN} 以上`,
   });
   return rows;
 }
@@ -119,7 +183,7 @@ function tierBoundsInBand(
   const idx = ROMAN_BY_INDEX.indexOf(tierRoman);
   const w = band.tierWidth;
   const low = band.min + idx * w;
-  const high = Math.min(band.max, low + w - 1);
+  const high = Math.min(band.maxExclusive - 1, low + w - 1);
   return { low, high };
 }
 
@@ -133,12 +197,12 @@ export function getRankData(rate: number): RankData {
       imagePath: rankImagePath("mythic-immortal"),
       tierRoman: null,
       bracketMin: IMMORTAL_MYTHIC_MIN,
-      bracketMax: 99999,
+      bracketMax: 999999,
     };
   }
 
   const band =
-    RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
+    RANK_BANDS.find((b) => r >= b.min && r < b.maxExclusive) ?? RANK_BANDS[0]!;
   const w = band.tierWidth;
   const idx = Math.min(3, Math.max(0, Math.floor((r - band.min) / w)));
   const tierRoman = ROMAN_BY_INDEX[idx]!;
@@ -184,18 +248,18 @@ export function formatRankTierLine(data: RankData): string {
 }
 
 export function isLifetimeTierOrRankPromoted(
-  lifetimeBefore: number,
-  lifetimeAfter: number
+  seasonBefore: number,
+  seasonAfter: number
 ): boolean {
   if (
-    !Number.isFinite(lifetimeBefore) ||
-    !Number.isFinite(lifetimeAfter) ||
-    lifetimeAfter <= lifetimeBefore
+    !Number.isFinite(seasonBefore) ||
+    !Number.isFinite(seasonAfter) ||
+    seasonAfter <= seasonBefore
   ) {
     return false;
   }
-  const before = getRankData(lifetimeBefore);
-  const after = getRankData(lifetimeAfter);
+  const before = getRankData(seasonBefore);
+  const after = getRankData(seasonAfter);
 
   const ai = rankLadderIndex(after.rankId);
   const bi = rankLadderIndex(before.rankId);
@@ -216,7 +280,7 @@ export function getTierProgress(rate: number): TierProgress {
   }
 
   const band =
-    RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
+    RANK_BANDS.find((b) => r >= b.min && r < b.maxExclusive) ?? RANK_BANDS[0]!;
   const w = band.tierWidth;
   const idx = Math.min(3, Math.max(0, Math.floor((r - band.min) / w)));
   const tierRoman = ROMAN_BY_INDEX[idx]!;
@@ -237,7 +301,7 @@ export function getTierProgress(rate: number): TierProgress {
   } else {
     const bandIdx = RANK_BANDS.indexOf(band);
     const nextBand = RANK_BANDS[bandIdx + 1];
-    nextThreshold = nextBand ? nextBand.min : GLORY_MYTHIC_MIN;
+    nextThreshold = nextBand != null ? nextBand.min : GLORY_MYTHIC_MIN;
   }
 
   const pointsToNext = Math.max(0, Math.ceil(nextThreshold - r));
@@ -271,7 +335,7 @@ export function getTierBarFromLifetimeRate(lifetimeRate: number): TierBarFromRat
   }
 
   const band =
-    RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
+    RANK_BANDS.find((b) => r >= b.min && r < b.maxExclusive) ?? RANK_BANDS[0]!;
   const w = band.tierWidth;
   const idx = Math.min(3, Math.max(0, Math.floor((r - band.min) / w)));
   const tierRoman = ROMAN_BY_INDEX[idx]!;

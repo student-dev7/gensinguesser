@@ -13,11 +13,11 @@ import {
 } from "@/lib/characterStats";
 import {
   applyWinRatingBonus,
-  clampLifetimeTotalRate,
   clampRating,
   DEFAULT_INITIAL_RATING,
   expectedScore,
   getSeasonWinBaseAndLoss,
+  WEEKLY_RATING_DROP,
 } from "@/lib/elo";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
@@ -46,7 +46,7 @@ type SubmitBody = {
   lostToGhost?: boolean;
   /** 降参した場合 true（キャラ統計の手数は 7 手として計上） */
   surrendered?: boolean;
-  /** 個人モード: 週次・累計レート・ゴールドは変えない */
+  /** 個人モード: 週次レート・ゴールドは変えない */
   personalMode?: boolean;
 };
 
@@ -86,17 +86,6 @@ function readSeasonRate(data: Record<string, unknown> | undefined): number {
   const legacy = data.rating;
   if (typeof legacy === "number" && Number.isFinite(legacy)) {
     return clampRating(legacy);
-  }
-  return DEFAULT_INITIAL_RATING;
-}
-
-function readLifetimeTotal(data: Record<string, unknown> | undefined): number {
-  if (!data) return DEFAULT_INITIAL_RATING;
-  const lt = data.lifetime_total_rate;
-  if (typeof lt === "number" && Number.isFinite(lt)) return clampLifetimeTotalRate(lt);
-  const legacy = data.rating;
-  if (typeof legacy === "number" && Number.isFinite(legacy)) {
-    return clampLifetimeTotalRate(legacy);
   }
   return DEFAULT_INITIAL_RATING;
 }
@@ -352,13 +341,12 @@ export async function POST(req: Request) {
           : undefined;
 
         let Rp = readSeasonRate(userData);
-        const lifetimeTotal = readLifetimeTotal(userData);
 
         let weeklyResetApplied = false;
         if (!personalMode && userSnap.exists()) {
           const storedKey = userData?.ratingWeekKey as string | undefined;
           if (storedKey !== undefined && storedKey !== currentWeekKey) {
-            Rp = DEFAULT_INITIAL_RATING;
+            Rp = clampRating(Rp - WEEKLY_RATING_DROP);
             weeklyResetApplied = true;
           }
         }
@@ -379,8 +367,7 @@ export async function POST(req: Request) {
         let eloActualScore: number;
         let eloExpected: number;
         let winBaseBonus: number | undefined;
-        let winSpeedBonus: number | undefined;
-        let ghostBeatBonus: number | undefined;
+        let handAvgBonus: number | undefined;
         let consumeNextWinDouble = false;
 
         if (personalMode) {
@@ -389,21 +376,17 @@ export async function POST(req: Request) {
           eloActualScore = 0;
           eloExpected = expectedScore(Rp, DEFAULT_INITIAL_RATING);
           winBaseBonus = undefined;
-          winSpeedBonus = undefined;
-          ghostBeatBonus = undefined;
+          handAvgBonus = undefined;
         } else if (won) {
           const win = applyWinRatingBonus(
             Rp,
             storedHandCount,
-            ghostHc !== undefined
-              ? { ghostHandCount: ghostHc }
-              : undefined
+            averageHandCount
           );
           newRating = win.newRating;
           ratingDelta = win.ratingDelta;
           winBaseBonus = win.baseBonus;
-          winSpeedBonus = win.speedBonus;
-          ghostBeatBonus = win.ghostBeatBonus;
+          handAvgBonus = win.handAvgBonus;
           const hasNextWinDouble =
             userSnap.exists() &&
             (userData as { next_win_rating_double?: unknown })
@@ -430,16 +413,12 @@ export async function POST(req: Request) {
           : goldEarnedFromRatingDelta(ratingDelta);
         const goldTotal = goldBefore + goldEarned;
 
-        /** 累計は減らさない（負け・減点時は週次のみ反映）。個人モードは累計も変えない */
-        const newLifetimeTotal = personalMode
-          ? lifetimeTotal
-          : clampLifetimeTotalRate(
-              lifetimeTotal + Math.max(0, ratingDelta)
-            );
+        /** ランク表示はシーズンレートのみ。lifetime_total_rate は互換のためシーズン値と同期 */
+        const newLifetimeTotal = personalMode ? Rp : newRating;
 
         const lifetimeTierPromoted =
           !personalMode &&
-          isLifetimeTierOrRankPromoted(lifetimeTotal, newLifetimeTotal);
+          isLifetimeTierOrRankPromoted(Rp, newRating);
         const promotedToRankLabel = lifetimeTierPromoted
           ? formatRankTierLine(getRankData(newLifetimeTotal))
           : undefined;
@@ -493,9 +472,8 @@ export async function POST(req: Request) {
             personalMode,
             ...(won && !personalMode
               ? {
-                  winBaseBonus: winBaseBonus ?? 6,
-                  winSpeedBonus: winSpeedBonus ?? 0,
-                  ghostBeatBonus: ghostBeatBonus ?? 0,
+                  winBaseBonus: winBaseBonus ?? 0,
+                  handAvgBonus: handAvgBonus ?? 0,
                 }
               : {}),
             createdAt: serverTimestamp(),
@@ -539,7 +517,7 @@ export async function POST(req: Request) {
           guessCount,
           characterStatsUpdated: shouldIncrementCharacterStats,
           winBaseBonus,
-          winSpeedBonus,
+          handAvgBonus,
           goldEarned,
           goldTotal,
           lifetimeTierPromoted,

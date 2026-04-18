@@ -1,11 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 import { isAdminUid } from "@/lib/adminUids";
-import {
-  clampLifetimeTotalRate,
-  clampRating,
-  DEFAULT_INITIAL_RATING,
-} from "@/lib/elo";
+import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/elo";
 import { getAdminFirestore } from "@/lib/firebaseAdmin";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 
@@ -21,18 +17,6 @@ function readSeasonFromDoc(d: Record<string, unknown>): number {
   const legacy = d.rating;
   if (typeof legacy === "number" && Number.isFinite(legacy)) {
     return clampRating(legacy);
-  }
-  return DEFAULT_INITIAL_RATING;
-}
-
-function readLifetimeFromDoc(d: Record<string, unknown>): number {
-  const lt = d.lifetime_total_rate;
-  if (typeof lt === "number" && Number.isFinite(lt)) {
-    return clampLifetimeTotalRate(lt);
-  }
-  const legacy = d.rating;
-  if (typeof legacy === "number" && Number.isFinite(legacy)) {
-    return clampLifetimeTotalRate(legacy);
   }
   return DEFAULT_INITIAL_RATING;
 }
@@ -90,15 +74,13 @@ export async function POST(req: Request) {
         );
       } else {
         const cr = readSeasonFromDoc(d);
-        const lt = readLifetimeFromDoc(d);
         const newCr = clampRating(cr + delta);
-        const newLt = clampLifetimeTotalRate(lt + delta);
         batch.set(
           docSnap.ref,
           {
             current_rate: newCr,
             rating: newCr,
-            lifetime_total_rate: newLt,
+            lifetime_total_rate: newCr,
             updatedAt: FieldValue.serverTimestamp(),
           },
           { merge: true }

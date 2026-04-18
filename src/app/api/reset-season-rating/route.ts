@@ -46,6 +46,7 @@ export async function POST(req: Request) {
         {
           current_rate: DEFAULT_INITIAL_RATING,
           rating: DEFAULT_INITIAL_RATING,
+          lifetime_total_rate: DEFAULT_INITIAL_RATING,
           ratingWeekKey: weekKey,
           updatedAt: serverTimestamp(),
         },

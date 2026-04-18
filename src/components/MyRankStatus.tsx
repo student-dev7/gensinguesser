@@ -11,7 +11,7 @@ import {
 } from "@/lib/rankUtils";
 
 type Props = {
-  /** 累計レート lifetime_total_rate（ランク・昇格表示の基準） */
+  /** シーズンレート（ランク表示の基準。state 名は page 側の互換のため lifetime） */
   lifetimeTotalRate: number | null;
   loading: boolean;
 };
